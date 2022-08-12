@@ -45,11 +45,10 @@ class bufferh(FileSystemEventHandler):
         returns target dir. And moves sp to it"""
         for dir in self.targets:
             spsize = self.getsize(sp)
-            print(spsize)
             if self.target_size_pool[dir] >= spsize:
                 # update pool size pre-move so other processes don't violate the limit.
                 self.target_size_pool[dir] -= spsize
-                print(os.system(f'powershell -command mv \'{sp}\' \'{dir}\''))
+                os.system(f'powershell -command mv \'{sp}\' \'{dir}\'')
                 return
         
         # Couldn't move file to any of the directories, either file is too big
@@ -60,10 +59,10 @@ class bufferh(FileSystemEventHandler):
         
         freeavg /= len(self.target_size_pool.items())
         if freeavg <= 0.1:
-            raise RuntimeError("Couldn't write new file to any of target folders, \
-                    target free average is too low: ", freeavg)
+            raise RuntimeError(f"""Couldn't write new file to any of target folders,
+                    target free average is too low: {freeavg}\nsrc_path: {sp}""")
         else:
-            print("Couldn't write data to any of folders, file is too big.")
+            print("Couldn't write data to any of folders, file is too big. \nsrc_path: ", sp)
 
     def on_created(self, event: Union[FileCreatedEvent, DirCreatedEvent]):
         self.move(event.src_path)
