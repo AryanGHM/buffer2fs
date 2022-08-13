@@ -1,4 +1,7 @@
+import ctypes
+from getopt import getopt
 import os, subprocess
+import sys
 from time import sleep
 from typing import Union
 from watchdog.observers import Observer
@@ -19,9 +22,6 @@ class bufferh(FileSystemEventHandler):
         for dir in self.targets:
             self.target_size_pool[dir] = self.limit
         super().__init__()
-
-    def on_any_event(self, event):
-        print('triggered: ', event)
 
     def getsize(self, sp) -> float:
         """ Get size of the path. """
@@ -47,31 +47,77 @@ class bufferh(FileSystemEventHandler):
             spsize = self.getsize(sp)
             if self.target_size_pool[dir] >= spsize:
                 # update pool size pre-move so other processes don't violate the limit.
+                print(f"Moving {sp} to {dir}, size (GB) {spsize}, target free {float(self.target_size_pool[dir])}")
                 self.target_size_pool[dir] -= spsize
                 os.system(f'powershell -command mv \'{sp}\' \'{dir}\'')
                 return
         
         # Couldn't move file to any of the directories, either file is too big
         # or all target directories are almost at the limit.
-        freeavg = 0
+        i = 0
+        j = 0
         for dir, free in self.target_size_pool.items():
-            freeavg += free
-        
-        freeavg /= len(self.target_size_pool.items())
-        if freeavg <= 0.1:
-            raise RuntimeError(f"""Couldn't write new file to any of target folders,
-                    target free average is too low: {freeavg}\nsrc_path: {sp}""")
-        else:
-            print("Couldn't write data to any of folders, file is too big. \nsrc_path: ", sp)
+            j += 1
+            if free / self.limit <= 0.1:
+                i += 1
+        print(f"i {i} j {j}")
+        if i == j:
+            print('\a')
+            ctypes.windll.user32.MessageBoxW(0, \
+                u"All directories are full, please empty target dirs and re-run the script.", u"bufferfs error", 0x1000)
+            exit(0)
 
     def on_created(self, event: Union[FileCreatedEvent, DirCreatedEvent]):
         self.move(event.src_path)
 
+def printhelp():
+    print("""Usage:
+ bufferfs --target-dir=.\\targets\\ --limit=100 --buffer-dir=.\\buffer
+
+Watches buffer-dir for new files and moves new files to the least numbered target directory
+under target-dir, with enough space below limit.
+
+args:
+--target-dir : A parent directory with only empty, numbered directories underneath. Example tree:\n
+| targets
+|| 1
+||| [Empty]
+|| 2
+||| [Empty]
+|| 3
+||| [Empty]
+
+--buffer-dir : Buffer directory all files inside directory will be split moved into target dirs.
+
+--limit : Target directories limit of size in gigabytes. If all directories are above 90 percent occupied.
+And a file is pending to move, raises an error and stops buffering.
+
+--help : Display this message and exit.""")
 
 if __name__ == "__main__":
+
+    longopts = ['target-dir=', 'limit=', 'buffer-dir=', 'help']
+    opts, args = getopt(sys.argv[1:], '', longopts)
+
+    targetd = None
+    limit = None
+    bufferd = None
+    for o, a in opts:
+        if o == '--help':
+            printhelp()
+            exit(0)
+        elif o == '--target-dir':
+            targetd = a
+        elif o == 'limit':
+            limit = int(a)
+        elif o == '--buffer-dir':
+            bufferd = a
+        elif o == '--limit':
+            limit = int(a)
+
     obs = Observer()
-    handler = bufferh(['.\\targets\\1\\', '.\\targets\\2\\'], 1)
-    obs.schedule(handler, '.\\buffer', recursive=False)
+    handler = bufferh([os.path.join(targetd, a) for a in os.listdir(targetd)], limit)
+    obs.schedule(handler, bufferd, recursive=False)
     obs.start()
     try:
         while 1:
@@ -79,3 +125,4 @@ if __name__ == "__main__":
     except:
         obs.stop()
         obs.join()
+        raise 
